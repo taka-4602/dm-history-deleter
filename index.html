@@ -150,7 +150,6 @@ const x_super_properties = "eyJvcyI6IldpbmRvd3MiLCJicm93c2VyIjoiQ2hyb21lIiwiZGV2
 
 let shouldStop = false;
 
-// 対象の種類によってラベルを変更する
 targetTypeRadios.forEach(radio => {
     radio.addEventListener('change', (e) => {
         if (e.target.value === 'user') {
@@ -252,7 +251,7 @@ async function deleteAllMyMessages(token, channelId, myId) {
                 if(response.status === 429) {
                     const errorData = await response.json();
                     const retryAfter = (errorData.retry_after || 1) * 1000;
-                    appendLog(`⏳ レート制限。${(retryAfter / 1000).toFixed(2)}秒待機します...`);
+                    appendLog(`⏳ メッセージ取得のレート制限。${(retryAfter / 1000).toFixed(2)}秒待機します...`);
                     await sleep(retryAfter);
                     continue;
                 }
@@ -269,29 +268,38 @@ async function deleteAllMyMessages(token, channelId, myId) {
                 messages.sort((a, b) => a.id.localeCompare(b.id));
             }
 
-            // 取得したメッセージの中から、自身のメッセージのみをフィルタリング
             const myMessages = messages.filter(msg => msg.author.id === myId);
             
             for (const message of myMessages) {
                 if (shouldStop) break;
                 
                 appendLog(`... メッセージを削除中 (ID: ${message.id})`);
-                const deleteResponse = await fetch(`https://discord.com/api/v9/channels/${channelId}/messages/${message.id}`, {
-                    method: 'DELETE',
-                    headers: { 'Authorization': token, 'x-super-properties': x_super_properties }
-                });
+                
+                let isMessageDeleted = false; // ループ制御用フラグ
+                
+                // 成功するか、致命的なエラーが出るまで再試行する
+                while (!isMessageDeleted && !shouldStop) {
+                    const deleteResponse = await fetch(`https://discord.com/api/v9/channels/${channelId}/messages/${message.id}`, {
+                        method: 'DELETE',
+                        headers: { 'Authorization': token, 'x-super-properties': x_super_properties }
+                    });
 
-                if (deleteResponse.ok) {
-                    messagesDeleted++;
-                    appendLog(`🗑️ 削除成功`);
-                    await sleep(500);
-                } else if (deleteResponse.status === 429) {
-                    const errorData = await deleteResponse.json();
-                    const retryAfter = (errorData.retry_after || 1) * 1000;
-                    appendLog(`⏳ レート制限。${(retryAfter / 1000).toFixed(2)}秒待機します...`);
-                    await sleep(retryAfter);
-                } else {
-                    appendLog(`❌ 削除失敗 (ID: ${message.id}) Status: ${deleteResponse.status}`);
+                    if (deleteResponse.ok) {
+                        messagesDeleted++;
+                        appendLog(`🗑️ 削除成功`);
+                        await sleep(500);
+                        isMessageDeleted = true; // 成功したので内側のループを抜けて次のメッセージへ
+                    } else if (deleteResponse.status === 429) {
+                        const errorData = await deleteResponse.json();
+                        const retryAfter = (errorData.retry_after || 1) * 1000;
+                        appendLog(`⏳ 削除のレート制限。${(retryAfter / 1000).toFixed(2)}秒待機して再試行します...`);
+                        await sleep(retryAfter);
+                        // isMessageDeleted は false のままなので、同じメッセージで再試行される
+                    } else {
+                        // 403 (権限なし) や 404 (既に削除済み) などの場合は再試行しても無駄なのでスキップ
+                        appendLog(`❌ 削除失敗 (ID: ${message.id}) Status: ${deleteResponse.status}`);
+                        isMessageDeleted = true; 
+                    }
                 }
             }
 
@@ -331,7 +339,7 @@ async function startDeletion() {
   if (targetType === 'user') {
       targetChannelId = await getDmChannelId(token, targetId);
   } else {
-      targetChannelId = targetId; // チャンネルIDが直接指定された場合はそのまま使用
+      targetChannelId = targetId;
       appendLog(`✅ 対象としてチャンネルIDが指定されました (ID: ${targetChannelId})`);
   }
   
