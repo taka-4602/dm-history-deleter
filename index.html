@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>DM History Deleter</title>
+  <title>Discord Message Deleter</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
   <style>
     ::-webkit-scrollbar { width: 6px; }
@@ -49,19 +49,23 @@
       margin-top: 15px;
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 12px;
       background: #2f3136;
       padding: 10px;
       border-radius: 8px;
     }
-    .option-group input[type="checkbox"] {
-      width: 18px; height: 18px; cursor: pointer;
+    .option-group input[type="checkbox"],
+    .option-group input[type="radio"] {
+      width: 18px; height: 18px; cursor: pointer; margin: 0;
     }
     .option-group label {
       margin-top: 0;
       cursor: pointer;
       font-size: 13px;
       color: #b9bbbe;
+      display: flex;
+      align-items: center;
+      gap: 6px;
     }
 
     button {
@@ -103,20 +107,25 @@
 </head>
 <body>
   <div class="card">
-    <h2>DM History Deleter</h2>
+    <h2>Message Deleter</h2>
     <form id="form">
       <label for="token">トークン</label>
       <input type="text" id="token" required placeholder="MT...............">
 
-      <label for="userId">相手のユーザーID</label>
-      <input type="text" id="userId" required placeholder="1234567890">
-      
+      <label>対象の種類</label>
       <div class="option-group">
-        <input type="checkbox" id="oldestFirst">
-        <label for="oldestFirst">過去のメッセージ（古い順）から削除する</label>
+        <label><input type="radio" name="targetType" value="user" checked> ユーザーID (DM)</label>
+        <label><input type="radio" name="targetType" value="channel"> チャンネルID</label>
       </div>
 
-      <button id="submitBtn" type="submit" class="primary">DM履歴を削除</button>
+      <label for="targetId" id="targetIdLabel">相手のユーザーID</label>
+      <input type="text" id="targetId" required placeholder="1234567890">
+      
+      <div class="option-group">
+        <label><input type="checkbox" id="oldestFirst"> 過去のメッセージ（古い順）から削除する</label>
+      </div>
+
+      <button id="submitBtn" type="submit" class="primary">メッセージ履歴を削除</button>
       
       <div class="button-group">
           <button id="stopBtn" type="button" class="secondary" disabled>停止</button>
@@ -128,7 +137,9 @@
 
 <script>
 const tokenInput = document.getElementById('token');
-const userIdInput = document.getElementById('userId');
+const targetIdInput = document.getElementById('targetId');
+const targetIdLabel = document.getElementById('targetIdLabel');
+const targetTypeRadios = document.querySelectorAll('input[name="targetType"]');
 const oldestFirstCheckbox = document.getElementById('oldestFirst');
 const form = document.getElementById('form');
 const submitBtn = document.getElementById('submitBtn');
@@ -138,6 +149,17 @@ const logEl = document.getElementById('log');
 const x_super_properties = "eyJvcyI6IldpbmRvd3MiLCJicm93c2VyIjoiQ2hyb21lIiwiZGV2aWNlIjoiIiwic3lzdGVtX2xvY2FsZSI6ImphLUFQIiwiaGFzX2NsaWVudF9tb2RzIjpmYWxzZSwiYnJvd3Nlcl91c2VyX2FnZW50IjoiTW96aWxsYS81LjAgKFdpbmRvd3MgTlQgMTAuMDsgV2luNjQ7IHg2NCkgQXBwbGVXZWJLaXQvNTM3LjM2IChLSFRNTCwgbGlrZSBHZWNrbykgQ2hyb21lLzEyNi4wLjAuMCBTYWZhcmkvNTM3LjM2IiwiYnJvd3Nlcl92ZXJzaW9uIjoiMTI2LjAuMC4wIiwib3NfdmVyc2lvbiI6IjEwIiwicmVmZXJyZXIiOiJodHRwczovL2Rpc2NvcmQuY29tL2NoYW5uZWxzL0BtZSIsInJlZmVycmluZ19kb21haW5fY3VycmVudCI6IiIsInJlbGVhc2VfY2hhbm5lbCI6InN0YWJsZSIsImNsaWVudF9idWlsZF9udW1iZXIiOjk5OTk5OSwiY2xpZW50X2V2ZW50X3NvdXJjZSI6bnVsbH0=";
 
 let shouldStop = false;
+
+// 対象の種類によってラベルを変更する
+targetTypeRadios.forEach(radio => {
+    radio.addEventListener('change', (e) => {
+        if (e.target.value === 'user') {
+            targetIdLabel.textContent = '相手のユーザーID';
+        } else {
+            targetIdLabel.textContent = 'チャンネルID';
+        }
+    });
+});
 
 function appendLog(text) {
   const time = new Date().toLocaleTimeString('ja-JP');
@@ -152,8 +174,9 @@ function setControlsState(isExecuting) {
     submitBtn.disabled = isExecuting;
     stopBtn.disabled = !isExecuting;
     tokenInput.disabled = isExecuting;
-    userIdInput.disabled = isExecuting;
+    targetIdInput.disabled = isExecuting;
     oldestFirstCheckbox.disabled = isExecuting;
+    targetTypeRadios.forEach(r => r.disabled = isExecuting);
 }
 
 async function getMyId(token) {
@@ -205,18 +228,16 @@ async function getDmChannelId(token, userId) {
 
 async function deleteAllMyMessages(token, channelId, myId) {
     const isOldestFirst = oldestFirstCheckbox.checked;
-    // 古い順なら "0" (最初から)、新しい順なら null (直近から) を起点にする
     let cursorId = isOldestFirst ? "0" : null;
     let messagesDeleted = 0;
     
-
     while (!shouldStop) {
         let url = `https://discord.com/api/v9/channels/${channelId}/messages?limit=100`;
         
         if (isOldestFirst) {
-            url += `&after=${cursorId}`; // cursorId より後のメッセージを取得
+            url += `&after=${cursorId}`;
         } else if (cursorId) {
-            url += `&before=${cursorId}`; // cursorId より前のメッセージを取得
+            url += `&before=${cursorId}`;
         }
 
         appendLog(`⏳ メッセージのバッチを取得中... [${isOldestFirst ? '古い順' : '新しい順'}]`);
@@ -235,7 +256,7 @@ async function deleteAllMyMessages(token, channelId, myId) {
                     await sleep(retryAfter);
                     continue;
                 }
-                throw new Error(`[${response.status}] メッセージの取得に失敗しました。`);
+                throw new Error(`[${response.status}] メッセージの取得に失敗しました。閲覧権限がない可能性があります。`);
             }
 
             let messages = await response.json();
@@ -244,11 +265,11 @@ async function deleteAllMyMessages(token, channelId, myId) {
                 break;
             }
 
-            // after(古い順)で取得した場合、APIはデフォルトで降順(新しい順)で返す場合があるためソート
             if (isOldestFirst) {
-                messages.sort((a, b) => a.id.localeCompare(b.id)); // ID昇順（古い順）
+                messages.sort((a, b) => a.id.localeCompare(b.id));
             }
 
+            // 取得したメッセージの中から、自身のメッセージのみをフィルタリング
             const myMessages = messages.filter(msg => msg.author.id === myId);
             
             for (const message of myMessages) {
@@ -263,7 +284,7 @@ async function deleteAllMyMessages(token, channelId, myId) {
                 if (deleteResponse.ok) {
                     messagesDeleted++;
                     appendLog(`🗑️ 削除成功`);
-                    await sleep(500); // 連続削除による検知を和らげるための微小待機
+                    await sleep(500);
                 } else if (deleteResponse.status === 429) {
                     const errorData = await deleteResponse.json();
                     const retryAfter = (errorData.retry_after || 1) * 1000;
@@ -274,8 +295,6 @@ async function deleteAllMyMessages(token, channelId, myId) {
                 }
             }
 
-            // 次の取得位置を更新
-            // 古い順なら取得した中で一番「新しい」ID、新しい順なら一番「古い」IDを起点にする
             cursorId = isOldestFirst ? messages[messages.length - 1].id : messages[messages.length - 1].id;
 
         } catch(error) {
@@ -291,10 +310,11 @@ async function startDeletion() {
   setControlsState(true);
   
   const token = tokenInput.value.trim();
-  const userId = userIdInput.value.trim();
+  const targetId = targetIdInput.value.trim();
+  const targetType = document.querySelector('input[name="targetType"]:checked').value;
 
-  if (!token || !userId) {
-    appendLog("⚠️ トークンとユーザーIDを両方入力してください。");
+  if (!token || !targetId) {
+    appendLog("⚠️ トークンとIDを両方入力してください。");
     setControlsState(false);
     return;
   }
@@ -306,17 +326,24 @@ async function startDeletion() {
     return;
   }
   
-  const dmChannelId = await getDmChannelId(token, userId);
+  let targetChannelId = null;
+
+  if (targetType === 'user') {
+      targetChannelId = await getDmChannelId(token, targetId);
+  } else {
+      targetChannelId = targetId; // チャンネルIDが直接指定された場合はそのまま使用
+      appendLog(`✅ 対象としてチャンネルIDが指定されました (ID: ${targetChannelId})`);
+  }
   
-  if (dmChannelId) {
-      const totalDeleted = await deleteAllMyMessages(token, dmChannelId, myId);
+  if (targetChannelId) {
+      const totalDeleted = await deleteAllMyMessages(token, targetChannelId, myId);
       if (shouldStop) {
         appendLog(`🛑 処理が手動で停止されました。合計 ${totalDeleted} 件のメッセージを削除しました。`);
       } else {
         appendLog(`🎉 完了！合計 ${totalDeleted} 件のメッセージを削除しました。`);
       }
   } else {
-    appendLog("🛑 DMチャンネルが見つからなかったため、処理を中止しました。");
+    appendLog("🛑 対象のチャンネルを特定できなかったため、処理を中止しました。");
   }
   
   setControlsState(false);
